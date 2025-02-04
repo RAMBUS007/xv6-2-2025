@@ -5,7 +5,7 @@
 #include <inc/string.h>
 
 #include <kern/console.h>
-
+#include <kern/monitor.h>
 #include <kern/env.h>
 #include <kern/kclock.h>
 #include <kern/pmap.h>
