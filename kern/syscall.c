@@ -12,6 +12,8 @@
 #include <kern/syscall.h>
 #include <kern/trap.h>
 
+#define PTE_NOT_CHECK 0x200
+
 // Print a string to the system console.
 // The string is exactly 'len' characters long.
 // Destroys the environment on memory errors.
@@ -311,47 +313,43 @@ static int sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva,
                             unsigned perm) {
   // LAB 4: Your code here.
   // panic("sys_ipc_try_send not implemented");
-  struct Env *e;
-  struct PageInfo *pp;
-  pte_t *pte;
-  int r;
-
-  if ((r = envid2env(envid, &e, 0)) != 0) {
-    return r;
-  }
-  if (e->env_ipc_recving == 0) {
-    return -E_IPC_NOT_RECV;
-  }
-  if (srcva && (uint32_t)srcva < UTOP) {
-    if (PGOFF(srcva) != 0) {
-      return -E_INVAL;
-    }
-    if ((perm & (PTE_U | PTE_P)) != (PTE_U | PTE_P)) {
-      return -E_INVAL;
-    }
-    if ((perm & ~(PTE_SYSCALL)) != 0) {
-      return -E_INVAL;
-    }
-    if ((pp = page_lookup(curenv->env_pgdir, srcva, &pte)) == NULL) {
-      return -E_INVAL;
-    }
-    if ((perm & PTE_W) == PTE_W) {
-      return -E_INVAL;
-    }
-    if ((r = page_insert(e->env_pgdir, pp, e->env_ipc_dstva, perm)) != 0) {
-      return r;
-    }
-    e->env_ipc_perm = perm;
-  } else {
-    e->env_ipc_perm = 0;
-  }
-  e->env_ipc_recving = 0;
-  e->env_ipc_from = curenv->env_id;
-  e->env_ipc_value = value;
-  e->env_status = ENV_RUNNABLE;
-  //receive系统调用成功的情况下不会切回用户态， 用户态的返回值这里设置为0
-	e->env_tf.tf_regs.reg_eax = 0;
-  return 0;
+  struct Env *target_env;
+	int result = envid2env(envid, &target_env, 0);
+	if(result < 0)
+		return result;
+	if(!target_env->env_ipc_recving || target_env->env_ipc_from)
+		return -E_IPC_NOT_RECV;
+	if(srcva && (unsigned)srcva < UTOP){
+		if((unsigned)srcva & (PGSIZE - 1))
+			return -E_INVAL;
+		if((perm & (PTE_U | PTE_P)) != (PTE_U | PTE_P) || (perm & (~(PTE_P | PTE_U | PTE_W | PTE_AVAIL))))
+			return -E_INVAL;
+		unsigned check_perm = PTE_U | PTE_P;
+		if(perm & PTE_W)
+			check_perm |= PTE_W;
+		if(user_mem_check(curenv, srcva, PGSIZE, check_perm) < 0)
+			return -E_INVAL;
+		if(target_env->env_ipc_dstva){
+			//如果对方设置了这个才表明要接受内存映
+			struct PageInfo *page_info;
+			pte_t *pte;
+			if (!(page_info = page_lookup(curenv->env_pgdir, srcva, &pte)))
+				return -E_INVAL;
+			result = page_insert(target_env->env_pgdir, page_info, target_env->env_ipc_dstva, perm);
+			if(result < 0)
+				return -E_NO_MEM;
+			target_env->env_ipc_perm = perm;
+		}
+	}
+	target_env->env_ipc_value = value;
+	target_env->env_ipc_from = curenv->env_id;
+	//得告诉内核该进程可以进行调度了
+	target_env->env_status = ENV_RUNNABLE;
+	//避免在下一次调度之前有新的进程通过该IPC与它通信
+	target_env->env_ipc_recving = false;
+	//receive系统调用成功的情况下不会切回用户态， 用户态的返回值这里设置为0
+	target_env->env_tf.tf_regs.reg_eax = 0;
+	return 0;
 }
 
 // Block until a value is ready.  Record that you want to receive
@@ -375,6 +373,7 @@ static int sys_ipc_recv(void *dstva) {
   curenv->env_ipc_dstva = dstva;
   curenv->env_ipc_from = 0;
   curenv->env_status = ENV_NOT_RUNNABLE;
+  sched_yield();
   return 0;
 }
 
