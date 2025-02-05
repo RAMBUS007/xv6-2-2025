@@ -348,6 +348,9 @@ static int sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva,
     if ((perm & ~(PTE_SYSCALL)) != 0) {
       return -E_INVAL;
     }
+    if ((pp = page_lookup(curenv->env_pgdir, srcva, &pte)) == NULL) {
+			return -E_INVAL;
+		}
     if ((perm & PTE_W) == PTE_W) {
       return -E_INVAL;
     }
