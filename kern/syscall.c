@@ -12,6 +12,8 @@
 #include <kern/syscall.h>
 #include <kern/trap.h>
 
+#define PTE_NOT_CHECK 0x200
+
 // Print a string to the system console.
 // The string is exactly 'len' characters long.
 // Destroys the environment on memory errors.
