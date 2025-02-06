@@ -11,6 +11,8 @@ void sched_halt(void);
 void
 sched_yield(void)
 {
+	struct Env *idle;
+
 	// Implement simple round-robin scheduling.
 	//
 	// Search through 'envs' for an ENV_RUNNABLE environment in
@@ -28,31 +30,24 @@ sched_yield(void)
 	// below to halt the cpu.
 
 	// LAB 4: Your code here.
-	struct Env *idle = curenv;
-	int idle_envid = (idle == NULL) ? -1 : ENVX(idle->env_id);
-	int i;
-
-	// search envs after idle
-	for (i = idle_envid + 1; i < NENV; i++) {
-		if (envs[i].env_status == ENV_RUNNABLE) {
-			env_run(&envs[i]);
+	// cprintf("enter yield");
+	struct Env* current_proc = thiscpu->cpu_env; //当前cpu正在运行的进程
+	int startid = (current_proc) ? ENVX(current_proc->env_id) : 0; //返回在当前CPU运行的进程ID
+	int next_procid;
+	for(int i = 0; i < NENV; i++) {
+		// 找到当前进城之后第一个状态为RUNNABLE的进程
+		next_procid = (startid+i) % NENV;
+		if(envs[next_procid].env_status == ENV_RUNNABLE) {
+			env_run(&envs[next_procid]); //运行新的进程
 		}
 	}
 
-	// find from 1st env if not found
-	for (i = 0; i < idle_envid; i++) {;
-		if (envs[i].env_status == ENV_RUNNABLE) {
-			env_run(&envs[i]);
-		}
+	//注释里面说到了，不能将当前正在运行的进程运行到别的CPU上。如果之前运行在当前CPU的进程仍然在运行
+	//且没有其他可以runnable的进程，那么就继续运行原来的进程
+	if(envs[startid].env_status == ENV_RUNNING && envs[startid].env_cpunum == cpunum()) {
+		env_run(current_proc); //继续运行原来的进程
 	}
-
-	// if still not found, try idle
-	if(idle != NULL && idle->env_status == ENV_RUNNING) {
-		env_run(idle);
-	}
-
-	// sched_halt never returns
-	sched_halt();
+    sched_halt();
 }
 
 // Halt this CPU when there is nothing to do. Wait until the

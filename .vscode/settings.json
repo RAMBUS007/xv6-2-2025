@@ -1,5 +1,7 @@
 {
     "files.associations": {
-        "cstdarg": "cpp"
+        "cstdarg": "cpp",
+        "fs.h": "c",
+        "functional": "c"
     }
 }

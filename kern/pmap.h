@@ -10,7 +10,7 @@
 #include <inc/assert.h>
 struct Env;
 
-extern char bootstacktop[], bootstack[];
+extern char bootstacktop[], bootstack[]; //在entry.S当中
 
 extern struct PageInfo *pages;
 extern size_t npages;

@@ -118,6 +118,23 @@ spawn(const char *prog, const char **argv)
 		perm = PTE_P | PTE_U;
 		if (ph->p_flags & ELF_PROG_FLAG_WRITE)
 			perm |= PTE_W;
+		/*
+			map_segment的作用是使用从elf header当中读取的数据
+			来将各个段映射到对应的地址当中去.
+			child:子进程的ID
+			ph->p_va:某个段要被映射到的虚拟地址的起始地址
+			ph->p_memsz:某个段在内存中的长度
+			ph->p_filesz:某个段在文件中的长度，一般来说ph->p_filesz < p_memsz
+			因为bss段在文件中不占据大小
+			ph->p_offset:在elf文件中的offset
+			perm:权限，比如说PTE_W | PTE_U等等
+
+			P.S.:
+			我最开始在ph->offseｔ和ph->va之间搞不明白．其实简单的来说
+			这两者区别很简单．offset是指在文件中的偏移，因为我们的程序都是分段的．
+			所以每个段必定都有在文件中的偏移．va是虚拟地址，就是要被加载到的内存的哪里
+
+		*/
 		if ((r = map_segment(child, ph->p_va, ph->p_memsz,
 				     fd, ph->p_filesz, ph->p_offset, perm)) < 0)
 			goto error;
@@ -126,6 +143,9 @@ spawn(const char *prog, const char **argv)
 	fd = -1;
 
 	// Copy shared library state.
+	// 因为在serve_open()函数当中，新打开的文件的struct Fd对应的页总是PTE_SHARE
+	// 我们的设计目的就是要让子进程和父进程共享file descriptor．不过我们没有复制
+	// 地址的内容，而是复制映射关系．
 	if ((r = copy_shared_pages(child)) < 0)
 		panic("copy_shared_pages: %e", r);
 
@@ -269,6 +289,12 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
 
 	//cprintf("map_segment %x+%x\n", va, memsz);
 
+	// va不一定是page-aligned，PGOFF(va)
+	//得到的是低12位的地址，比如PGOFF(0x1234)得到的
+	//是0x234,下面的代码意思就是我们需要将虚拟地址，memsz这些
+	//信息都变成page-aligned,不过问题就是．是否会因为va -= i
+	//这个操作而覆盖其他地址内容．我觉得应该是不会的，因为在系统当中
+	//申请的时候时候(sys_page_alloc)都是根据page-aligned操作的．
 	if ((i = PGOFF(va))) {
 		va -= i;
 		memsz += i;
@@ -279,18 +305,30 @@ map_segment(envid_t child, uintptr_t va, size_t memsz,
 	for (i = 0; i < memsz; i += PGSIZE) {
 		if (i >= filesz) {
 			// allocate a blank page
+			//前面已经解释过了为什么会出现memsz > filesz的情况
+			//对于这样的情况，只需要直接在给子进程分配空闲页就行．
 			if ((r = sys_page_alloc(child, (void*) (va + i), perm)) < 0)
 				return r;
 		} else {
 			// from file
+			//为临时地址UTEMP分配一个页，我们先暂时将数据读取到这个临时地址
+			//第一个参数为0的意思是应该现在父进程当中分配一个页，待会再将映射关系
+			//复制给子进程，和fork里面有点像．
 			if ((r = sys_page_alloc(0, UTEMP, PTE_P|PTE_U|PTE_W)) < 0)
 				return r;
+
+			//从elf文件中读取数据后，每次的offset都需要累加
 			if ((r = seek(fd, fileoffset + i)) < 0)
 				return r;
+			//暂时先将数据读取到UTEMP，一般来说，每次读取的数据大小是PGSIZE
+			//当读取到文件末尾的时候，极有可能读取的大小并不是PGSIZIE的(因为一个elf
+			//怎么可能都是page-aligned的呢？)
 			if ((r = readn(fd, UTEMP, MIN(PGSIZE, filesz-i))) < 0)
 				return r;
+			//将当前进程UTEMP虚拟地址对应的地址映射关系复制到子进程的va+i去
 			if ((r = sys_page_map(0, UTEMP, child, (void*) (va + i), perm)) < 0)
 				panic("spawn: sys_page_map data: %e", r);
+			//将UTEMP取消映射，以备后面继续使用
 			sys_page_unmap(0, UTEMP);
 		}
 	}
@@ -302,6 +340,18 @@ static int
 copy_shared_pages(envid_t child)
 {
 	// LAB 5: Your code here.
+    size_t pn;
+    int r;
+    struct Env *e;
+    
+    for (pn = PGNUM(UTEXT); pn < PGNUM(USTACKTOP); ++pn) {
+        if ( (uvpd[pn >> 10] & PTE_P) && (uvpt[pn] & PTE_P) ) {
+            if (uvpt[pn] & PTE_SHARE) {
+                if ( (r = sys_page_map(thisenv->env_id, (void *)(pn*PGSIZE), child, (void *)(pn*PGSIZE), uvpt[pn] & PTE_SYSCALL )) < 0)
+                    return r;                
+            }
+        }
+    }
 	return 0;
 }
 

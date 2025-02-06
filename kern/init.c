@@ -1,14 +1,14 @@
 /* See COPYRIGHT for copyright information. */
 
-#include <inc/assert.h>
 #include <inc/stdio.h>
 #include <inc/string.h>
+#include <inc/assert.h>
 
-#include <kern/console.h>
 #include <kern/monitor.h>
-#include <kern/env.h>
-#include <kern/kclock.h>
+#include <kern/console.h>
 #include <kern/pmap.h>
+#include <kern/kclock.h>
+#include <kern/env.h>
 #include <kern/trap.h>
 #include <kern/sched.h>
 #include <kern/picirq.h>
@@ -17,26 +17,22 @@
 
 static void boot_aps(void);
 
-void i386_init(void) {
-  extern char edata[], end[];
 
-  // Before doing anything else, complete the ELF loading process.
-  // Clear the uninitialized global data (BSS) section of our program.
-  // This ensures that all static/global variables start out zero.
-  memset(edata, 0, end - edata);
+void
+i386_init(void)
+{
+	// Initialize the console.
+	// Can't call cprintf until after we do this!
+	cons_init();
 
-  // Initialize the console.
-  // Can't call cprintf until after we do this!
-  cons_init();
+	cprintf("6828 decimal is %o octal!\n", 6828);
 
-  cprintf("6828 decimal is %o octal!\n", 6828);
+	// Lab 2 memory management initialization functions
+	mem_init();
 
-  // Lab 2 memory management initialization functions
-  mem_init();
-
-  // Lab 3 user environment initialization functions
-  env_init();
-  trap_init();
+	// Lab 3 user environment initialization functions
+	env_init();
+	trap_init();
 
 	// Lab 4 multiprocessor initialization functions
 	mp_init();
@@ -47,8 +43,7 @@ void i386_init(void) {
 
 	// Acquire the big kernel lock before waking up APs
 	// Your code here:
-  lock_kernel();
-
+	lock_kernel();
 	// Starting non-boot CPUs
 	boot_aps();
 
@@ -56,15 +51,11 @@ void i386_init(void) {
 	ENV_CREATE(fs_fs, ENV_TYPE_FS);
 
 #if defined(TEST)
-  // Don't touch -- used by grading script!
-  ENV_CREATE(TEST, ENV_TYPE_USER);
+	// Don't touch -- used by grading script!
+	ENV_CREATE(TEST, ENV_TYPE_USER);
 #else
 	// Touch all you want.
 	ENV_CREATE(user_icode, ENV_TYPE_USER);
-  	// ENV_CREATE(user_yield, ENV_TYPE_USER);
-	// ENV_CREATE(user_yield, ENV_TYPE_USER);
-	// ENV_CREATE(user_yield, ENV_TYPE_USER);
-	// ENV_CREATE(user_primes, ENV_TYPE_USER);
 #endif // TEST*
 
 	// Should not be necessary - drains keyboard because interrupt has given up.
@@ -90,7 +81,7 @@ boot_aps(void)
 	// Write entry code to unused memory at MPENTRY_PADDR
 	code = KADDR(MPENTRY_PADDR);
 	memmove(code, mpentry_start, mpentry_end - mpentry_start);
-
+	
 	// Boot each AP one at a time
 	for (c = cpus; c < cpus + ncpu; c++) {
 		if (c == cpus + cpunum())  // We've started already.
@@ -124,9 +115,10 @@ mp_main(void)
 	// only one CPU can enter the scheduler at a time!
 	//
 	// Your code here:
-  lock_kernel();
-  sched_yield();
-
+	lock_kernel();
+	sched_yield();
+	// Remove this after you finish Exercise 6
+	// for (;;);
 }
 
 /*
@@ -139,15 +131,17 @@ const char *panicstr;
  * Panic is called on unresolvable fatal errors.
  * It prints "panic: mesg", and then enters the kernel monitor.
  */
-void _panic(const char *file, int line, const char *fmt, ...) {
-  va_list ap;
+void
+_panic(const char *file, int line, const char *fmt,...)
+{
+	va_list ap;
 
-  if (panicstr)
-    goto dead;
-  panicstr = fmt;
+	if (panicstr)
+		goto dead;
+	panicstr = fmt;
 
-  // Be extra sure that the machine is in as reasonable state
-  asm volatile("cli; cld");
+	// Be extra sure that the machine is in as reasonable state
+	asm volatile("cli; cld");
 
 	va_start(ap, fmt);
 	cprintf("kernel panic on CPU %d at %s:%d: ", cpunum(), file, line);
@@ -156,18 +150,20 @@ void _panic(const char *file, int line, const char *fmt, ...) {
 	va_end(ap);
 
 dead:
-  /* break into the kernel monitor */
-  while (1)
-    monitor(NULL);
+	/* break into the kernel monitor */
+	while (1)
+		monitor(NULL);
 }
 
 /* like panic, but don't */
-void _warn(const char *file, int line, const char *fmt, ...) {
-  va_list ap;
+void
+_warn(const char *file, int line, const char *fmt,...)
+{
+	va_list ap;
 
-  va_start(ap, fmt);
-  cprintf("kernel warning at %s:%d: ", file, line);
-  vcprintf(fmt, ap);
-  cprintf("\n");
-  va_end(ap);
+	va_start(ap, fmt);
+	cprintf("kernel warning at %s:%d: ", file, line);
+	vcprintf(fmt, ap);
+	cprintf("\n");
+	va_end(ap);
 }

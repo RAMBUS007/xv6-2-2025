@@ -22,7 +22,8 @@
 
 int
 fd2num(struct Fd *fd)
-{
+{	
+	//将sturct Fd这个结构转为file descriptor
 	return ((uintptr_t) fd - FDTABLE) / PGSIZE;
 }
 
@@ -72,9 +73,9 @@ fd_alloc(struct Fd **fd_store)
 //	-E_INVAL: fdnum was either not in range or not mapped.
 int
 fd_lookup(int fdnum, struct Fd **fd_store)
-{
+{	
+	// cprintf("enter fd_lookup\n");
 	struct Fd *fd;
-
 	if (fdnum < 0 || fdnum >= MAXFD) {
 		if (debug)
 			cprintf("[%08x] bad fd %d\n", thisenv->env_id, fdnum);
@@ -133,7 +134,8 @@ static struct Dev *devtab[] =
 
 int
 dev_lookup(int dev_id, struct Dev **dev)
-{
+{	
+
 	int i;
 	for (i = 0; devtab[i]; i++)
 		if (devtab[i]->dev_id == dev_id) {
@@ -200,6 +202,14 @@ err:
 	return r;
 }
 
+void print_fd(struct Fd *fd) {
+	cprintf("--------------------\n");
+	cprintf("fd_dev_id:%d\n",fd->fd_dev_id);
+	cprintf("fd_offset：%d\n",fd->fd_offset);
+	cprintf("fd_mode:%d\n",fd->fd_omode);
+	cprintf("fd_file:%d\n",fd->fd_file);
+	cprintf("---------------------\n");
+}
 ssize_t
 read(int fdnum, void *buf, size_t n)
 {
@@ -207,15 +217,30 @@ read(int fdnum, void *buf, size_t n)
 	struct Dev *dev;
 	struct Fd *fd;
 
-	if ((r = fd_lookup(fdnum, &fd)) < 0
-	    || (r = dev_lookup(fd->fd_dev_id, &dev)) < 0)
+	//到这里，struct Fd *fd已经在serve_open()函数中初始化好了
+	//fd_lookup用于寻找fdnum对应的struct Fd
+	// if ((r = fd_lookup(fdnum, &fd)) < 0
+	// 	//dev_lookup根据fd->fd_dev_id来寻找对应的device
+	// 	//比如说硬盘用devfile,pipｅ用devpipe
+	//     || (r = dev_lookup(fd->fd_dev_id, &dev)) < 0)
+	// 	return r;
+	if ((r = fd_lookup(fdnum,&fd)) < 0) {
+		cprintf("failed to find %d file descriptor\n",fdnum);
 		return r;
+	}
+	// print_fd(fd);
+	if ((r = dev_lookup(fd->fd_dev_id,&dev)) < 0) {
+		cprintf("failed to find device type %d\n",fd->fd_dev_id);
+		return r;
+	}
 	if ((fd->fd_omode & O_ACCMODE) == O_WRONLY) {
 		cprintf("[%08x] read %d -- bad mode\n", thisenv->env_id, fdnum);
 		return -E_INVAL;
 	}
 	if (!dev->dev_read)
 		return -E_NOT_SUPP;
+		//调用某个device自己的read()函数，这下面是一个函数指针，
+		//具体看struct Dev可以理解
 	return (*dev->dev_read)(fd, buf, n);
 }
 
